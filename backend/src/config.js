@@ -39,6 +39,17 @@ export const config = Object.freeze({
     ipCheck: process.env.YOOKASSA_IP_CHECK === '1',
   },
 
+  yandex: {
+    clientId: required('YANDEX_CLIENT_ID'),
+    clientSecret: required('YANDEX_CLIENT_SECRET'),
+    // Должен в точности совпадать с Callback URI в настройках приложения на oauth.yandex.ru и с константой в Android.
+    redirectUri: process.env.YANDEX_REDIRECT_URI?.trim() || 'myvpn://auth',
+  },
+
+  // Ключ подписи сессионных токенов (openssl rand -hex 32). Смена ключа разлогинивает всех.
+  sessionSecret: required('SESSION_SECRET'),
+  sessionTtlMs: Number(process.env.SESSION_TTL_DAYS || 90) * 24 * 60 * 60 * 1000,
+
   appHmacSecret: required('APP_HMAC_SECRET'),
   trialMs: 24 * 60 * 60 * 1000,
 });

@@ -7,3 +7,8 @@ export const PLANS = Object.freeze({
 
 export const DAY_MS = 86_400_000;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Идентификатор пользователя = email клиента в 3x-ui: `ya-<числовой id Яндекса>`. */
+export const USER_ID_RE = /^ya-\d{1,20}$/;
+/** Принимаем и старые UUID (клиенты и платежи, созданные до перехода на Яндекс ID). */
+export const isSubjectId = (s) => typeof s === 'string' && (USER_ID_RE.test(s) || UUID_RE.test(s));

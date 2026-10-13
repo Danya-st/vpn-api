@@ -147,7 +147,7 @@ export class XuiClient {
       if (e instanceof XuiError && /not found/i.test(e.message)) return null;
       throw e;
     }
-    return normalizeClient(data.obj);
+    return normalizeClient(data.obj, email);
   }
 
   /**
@@ -183,9 +183,12 @@ const NON_CLIENT_KEYS = ['inboundIds', 'traffic', 'externalLinks', 'externalConf
  * Приводит ответ clients/get к форме add/update. В списках панели числовой `id` — ID записи, а UUID
  * лежит в `uuid`; в add/update UUID передаётся в `id`.
  */
-export function normalizeClient(obj) {
+export function normalizeClient(obj, email) {
   if (!obj || typeof obj !== 'object') return null;
   const client = { ...obj };
+  // Панель не всегда отдаёт email в clients/get (мы же искали клиента именно по нему) —
+  // без этого update уходил на /clients/update/undefined.
+  if (typeof client.email !== 'string' || !client.email) client.email = email;
   for (const k of NON_CLIENT_KEYS) delete client[k];
   if (typeof client.uuid === 'string' && client.uuid) {
     client.id = client.uuid;

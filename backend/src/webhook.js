@@ -55,11 +55,11 @@ export async function handleYooKassaNotification({ yookassa, service, log, ipChe
   }
 
   const result = await service.applyPayment({
-    deviceId: order.deviceId,
+    userId: order.userId,
     planKey: order.planKey,
     paymentKey: `yookassa:${order.paymentId}`,
   });
-  log.info(`[webhook] yookassa:${order.paymentId} device=${order.deviceId} plan=${order.planKey}: ${result}`);
+  log.info(`[webhook] yookassa:${order.paymentId} user=${order.userId} plan=${order.planKey}: ${result}`);
 
   if (result === 'applied' && ledger) {
     try {
@@ -69,7 +69,7 @@ export async function handleYooKassaNotification({ yookassa, service, log, ipChe
         amount: payment.amount.value,
         currency: payment.amount.currency,
         plan: order.planKey,
-        deviceId: order.deviceId,
+        userId: order.userId,
       });
     } catch (e) {
       // Подписка уже продлена — вебхук не должен падать из-за диска; запись восстановима по реестру ЮKassa.
