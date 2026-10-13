@@ -12,7 +12,6 @@ const xui = {
   token: optional('XUI_API_TOKEN'),
   username: optional('XUI_USERNAME'),
   password: optional('XUI_PASSWORD'),
-  inboundId: Number(process.env.XUI_INBOUND_ID || 1),
 };
 if (!xui.token && !(xui.username && xui.password)) {
   throw new Error('Set XUI_API_TOKEN (recommended) or both XUI_USERNAME and XUI_PASSWORD');

@@ -47,8 +47,15 @@ export class SubscriptionService {
           expiryTime: Number(traffic.expiryTime) || 0,
         };
       }
+      const inbounds = await this.xui.listInbounds();
+      if (!inbounds || inbounds.length === 0) {
+        throw new Error('No suitable inbounds found (VLESS + TCP + Reality)');
+      }
+      const inboundIds = inbounds.map(i => i.id);
+      this.log.info(`[register] found ${inboundIds.length} suitable inbounds: [${inboundIds.join(', ')}]`);
+
       const client = this.#newClient(deviceId, Date.now() + this.trialMs, 'trial');
-      await this.xui.addClient(client);
+      await this.xui.addClient(client, inboundIds);
       this.log.info(`[register] trial issued to ${deviceId}`);
       return { created: true, subLink: this.subLink(client), expiryTime: client.expiryTime };
     });

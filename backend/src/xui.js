@@ -32,7 +32,6 @@ export class XuiClient {
     this.token = token?.trim() || null;
     this.username = username;
     this.password = password;
-    this.inboundId = inboundId;
     if (!this.token && !(username && password)) {
       throw new XuiError('3x-ui: нужен XUI_API_TOKEN либо XUI_USERNAME + XUI_PASSWORD');
     }
@@ -126,7 +125,13 @@ export class XuiClient {
   /** Список инбаундов (для диагностики check-xui.js). */
   async listInbounds() {
     const data = await this.#request('GET', '/panel/api/inbounds/list');
-    return Array.isArray(data.obj) ? data.obj : [];
+    const inbounds = Array.isArray(data.obj) ? data.obj : [];
+    return inbounds.filter(i => 
+      i.enable && 
+      i.protocol === 'vless' && 
+      i.streamSettings?.network === 'tcp' && 
+      i.streamSettings?.security === 'reality'
+    );
   }
 
   /**
@@ -151,10 +156,13 @@ export class XuiClient {
    * Именно `inboundIds` (массив): поле `inboundId` панель молча игнорирует и отвечает
    * "at least one inbound is required".
    */
-  async addClient(client) {
+  async addClient(client, inboundIds) {
+    if (!Array.isArray(inboundIds) || inboundIds.length === 0) {
+      throw new XuiError('addClient requires a non-empty inboundIds array');
+    }
     await this.#request('POST', '/panel/api/clients/add', {
       client,
-      inboundIds: [this.inboundId],
+      inboundIds,
     });
   }
 

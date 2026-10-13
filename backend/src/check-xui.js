@@ -19,7 +19,7 @@ async function main() {
     bad('Не заданы XUI_URL и XUI_API_TOKEN (либо XUI_USERNAME + XUI_PASSWORD) в backend/.env');
     process.exit(1);
   }
-  const xui = new XuiClient({ url, token, username, password, inboundId });
+  const xui = new XuiClient({ url, token, username, password });
 
   try {
     if (xui.authMode === 'token') {
@@ -40,17 +40,9 @@ async function main() {
     }
     console.log('');
 
-    const chosen = inbounds.find((i) => i.id === inboundId);
-    if (!chosen) {
-      bad(`Инбаунда с id=${inboundId} нет. Укажите в XUI_INBOUND_ID id нужного инбаунда из списка выше.`);
-      process.exitCode = 1;
-    } else if (!chosen.suitable) {
-      bad(`Инбаунд ${inboundId} — ${chosen.protocol}/${chosen.network}/${chosen.security}. Нужен VLESS + TCP (RAW) + Reality: ` +
-        'парсер приложения принимает только такие ссылки.');
-      process.exitCode = 1;
-    } else {
-      ok(`Инбаунд ${inboundId}: VLESS + TCP + Reality — подходит${chosen.enabled ? '' : ', но он ВЫКЛЮЧЕН в панели'}`);
-    }
+    ok(`Найдено ${inbounds.length} подходящих инбаундов`);
+    console.log(`  При регистрации новый клиент будет автоматически добавлен во ВСЕ эти ${inbounds.length} инбаундов.`);
+    console.log('  Приложение получит одну ссылку подписки, содержащую конфигурации для всех портов (round-robin).');
 
     if (!subBase) bad('SUB_BASE_URL не задан');
     else {
