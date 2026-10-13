@@ -7,13 +7,12 @@ services:
     environment:
       NODE_ENV: production
     ports:
-      # Только loopback: наружу API выходит через Caddy (см. профиль proxy ниже) или ваш nginx.
-      #- "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
-      - "3000:3000"
+      - "8443:8443"
     extra_hosts:
       - "host.docker.internal:host-gateway"   # доступ контейнера к 3x-ui, запущенному на хосте (network_mode: host)
     volumes:
       - vpn_data:/data                         # журнал платежей и книга платежей
+      - /etc/letsencrypt:/etc/letsencrypt:ro   # Монтируем сертификаты в контейнер
     read_only: true
     tmpfs:
       - /tmp
@@ -21,25 +20,5 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-
-  # HTTPS для приложения и вебхука ЮKassa. Включается отдельно:  docker compose --profile proxy up -d
-  # Не нужен, если у вас уже есть nginx/Caddy — тогда проксируйте на 127.0.0.1:3000.
-  caddy:
-    image: caddy:2-alpine
-    container_name: vpn-caddy
-    profiles: ["proxy"]
-    restart: unless-stopped
-    depends_on:
-      - api
-    ports:
-      - "80:80"      # только для выпуска сертификата Let's Encrypt (HTTP-01)
-      - "8443:8443"  # HTTPS API; порт 443 обычно занят Reality, а ЮKassa принимает 443 или 8443
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
 volumes:
   vpn_data:
-  caddy_data:
-  caddy_config:

@@ -1,3 +1,5 @@
+import https from 'https';
+import fs from 'fs';
 import axios from 'axios';
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
@@ -149,7 +151,15 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ success: false, error: 'internal_error' });
 });
 
-const server = app.listen(config.port, () => log.info(`API listening on :${config.port}`));
+const httpsOptions = {
+  key: fs.readFileSync(process.env.HTTPS_KEY_PATH),
+  cert: fs.readFileSync(process.env.HTTPS_CERT_PATH),
+};
+
+const server = https.createServer(httpsOptions, app).listen(config.port, () => {
+  log.info(`HTTPS API listening on :${config.port}`);
+});
+
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => server.close(() => process.exit(0)));
 }
