@@ -84,7 +84,9 @@ export class SubscriptionService {
     return withKeyLock(userId, async () => {
       if (this.journal.has(paymentKey)) return 'duplicate';
 
-      const current = await this.xui.findClient(userId);
+      // clients/get в 3x-ui v3 не гарантирует expiryTime в объекте клиента (срок может лежать в traffic),
+      // из-за чего остаток терялся и срок считался от now. Эталон срока — строка трафика (её же читает /status).
+      const [current, traffic] = await Promise.all([this.xui.findClient(userId), this.xui.getClientTraffic(userId)]);
       const now = Date.now();
 
       if (!current) {
@@ -93,10 +95,11 @@ export class SubscriptionService {
         await this.xui.addClient(fresh);
         this.log.warn(`[payment] client ${userId} was missing, re-created for ${planKey}`);
       } else {
-        const currentExpiry = Number(current.expiryTime) || 0;
-        const currentExpiryMs = currentExpiry < 10000000000 ? currentExpiry * 1000 : currentExpiry;
+        const currentExpiry = Math.max(Number(current.expiryTime) || 0, Number(traffic?.expiryTime) || 0);
         const base = currentExpiry > now ? currentExpiry : now;
-        this.log.info(`[DEBUG] raw=${currentExpiry}, now=${now}, base=${base}`);
+        // updateClient заменяет клиента ЦЕЛИКОМ: берём существующий объект и меняем только срок/enable,
+        // иначе пропали бы subId (сломается ссылка подписки), flow (сломается Vision), лимиты.
+        // email берём у себя (он и есть userId), а не из ответа панели: там он может отсутствовать.
         const updated = { ...current, email: userId, expiryTime: base + plan.days * DAY_MS, enable: true };
         await this.xui.updateClient(userId, updated);
         this.log.info(`[payment] ${userId} +${plan.days}d -> ${new Date(updated.expiryTime).toISOString()}`);

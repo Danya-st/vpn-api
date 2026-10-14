@@ -189,6 +189,8 @@ export function normalizeClient(obj, email) {
   // Панель не всегда отдаёт email в clients/get (мы же искали клиента именно по нему) —
   // без этого update уходил на /clients/update/undefined.
   if (typeof client.email !== 'string' || !client.email) client.email = email;
+  // Срок мог прийти только внутри агрегата traffic — вытаскиваем до его удаления.
+  if (!Number(client.expiryTime) && Number(client.traffic?.expiryTime)) client.expiryTime = client.traffic.expiryTime;
   for (const k of NON_CLIENT_KEYS) delete client[k];
   if (typeof client.uuid === 'string' && client.uuid) {
     client.id = client.uuid;
