@@ -94,10 +94,9 @@ export class SubscriptionService {
         this.log.warn(`[payment] client ${userId} was missing, re-created for ${planKey}`);
       } else {
         const currentExpiry = Number(current.expiryTime) || 0;
+        const currentExpiryMs = currentExpiry < 10000000000 ? rawExpiry * 1000 : currentExpiry;
         const base = currentExpiry > now ? currentExpiry : now;
-        // updateClient заменяет клиента ЦЕЛИКОМ: берём существующий объект и меняем только срок/enable,
-        // иначе пропали бы subId (сломается ссылка подписки), flow (сломается Vision), лимиты.
-        // email берём у себя (он и есть userId), а не из ответа панели: там он может отсутствовать.
+        this.log.info(`[DEBUG] raw=${currentExpiry}, now=${now}, base=${base}`);
         const updated = { ...current, email: userId, expiryTime: base + plan.days * DAY_MS, enable: true };
         await this.xui.updateClient(userId, updated);
         this.log.info(`[payment] ${userId} +${plan.days}d -> ${new Date(updated.expiryTime).toISOString()}`);
