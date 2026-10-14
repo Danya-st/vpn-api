@@ -94,7 +94,7 @@ export class SubscriptionService {
         this.log.warn(`[payment] client ${userId} was missing, re-created for ${planKey}`);
       } else {
         const currentExpiry = Number(current.expiryTime) || 0;
-        const currentExpiryMs = currentExpiry < 10000000000 ? rawExpiry * 1000 : currentExpiry;
+        const currentExpiryMs = currentExpiry < 10000000000 ? currentExpiry * 1000 : currentExpiry;
         const base = currentExpiry > now ? currentExpiry : now;
         this.log.info(`[DEBUG] raw=${currentExpiry}, now=${now}, base=${base}`);
         const updated = { ...current, email: userId, expiryTime: base + plan.days * DAY_MS, enable: true };
