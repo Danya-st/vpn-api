@@ -49,10 +49,11 @@ app.disable('x-powered-by');
 app.set('trust proxy', config.trustProxy); // за reverse proxy, иначе rate-limit видит один IP
 
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
-const limiter = (windowMs, limit) =>
+const limiter = (windowMs, limit, extra = {}) =>
   rateLimit({
     windowMs,
     limit,
+    ...extra,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { success: false, error: 'too_many_requests' },
@@ -108,7 +109,13 @@ api.post('/auth/refresh', (req, res) => {
 
 api.post(
   '/register',
-  limiter(60 * 60_000, 10), // 10 регистраций в час с одного IP (триал — главная цель злоупотреблений)
+  // Лимит — на ВЫДАЧУ новых триалов (главная цель злоупотреблений), а не на запросы: /register идемпотентен,
+  // и каждый повторный вход существующего пользователя (выход → вход) иначе упирался бы в 429.
+  wrap(async (req, _res, next) => {
+    req.knownClient = await service.exists(req.userId);
+    next();
+  }),
+  limiter(60 * 60_000, 10, { skip: (req) => req.knownClient === true }), // 10 новых регистраций в час с одного IP
   wrap(async (req, res) => {
     const r = await service.register(req.userId);
     res.json({ success: true, subLink: r.subLink, expiryTime: r.expiryTime });
