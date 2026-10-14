@@ -1,115 +1,74 @@
-# VPN API — backend (Express + 3x-ui + ЮKassa)
+# vpn-api
+
+Backend личного VPN-сервиса **LainTun**: выдаёт триал, продлевает подписки после оплаты через ЮKassa и управляет клиентами в панели **3x-ui** (VLESS + Reality). Вход пользователей — через **Яндекс ID**. Собственной базы данных нет: источник истины по подпискам — 3x-ui, личность — подписанный токен.
+
+
+## Возможности
+
+- Вход через Яндекс OAuth (Authorization Code + PKCE), stateless-сессии на подписанном JWT (HS256)
+- Автоматический триал на 24 часа при первом входе
+- Оплата тарифов через ЮKassa, продление подписки по вебхуку (идемпотентно, срок суммируется с остатком)
+- Управление клиентами 3x-ui через его API (токен или логин/пароль)
+- Защита API: HMAC-подпись приложения, rate-limit, проверка вебхука повторным запросом платежа
+- Запуск в Docker: read-only ФС, без capabilities, непривилегированный пользователь
+
+## Стек
+
+Node.js ≥ 20 (ESM) · Express 4 · express-rate-limit · axios (+ axios-cookiejar-support, tough-cookie для режима логина 3x-ui) · встроенные `node:crypto`, `node:test`. Тесты — без сторонних фреймворков.
+
+## Структура
 
 ```
-docker-compose.yml  Caddyfile
+docker-compose.yml
 backend/
   Dockerfile  .dockerignore  .env.example  package.json
-  src/  index.js  config.js  plans.js  appAuth.js  xui.js  service.js
-        yookassa.js  payments.js  webhook.js  ipAllow.js  returnPage.js  util.js  (журнал + книга платежей)
-        check-xui.js  xuiDiagnostics.js  (проверка связи с 3x-ui)
-  test/ appauth.test.js  service.test.js  yookassa.test.js  webhook.test.js  diagnostics.test.js
+  src/
+    index.js          маршруты, rate-limit, обработка ошибок, HTTPS-сервер
+    config.js         чтение и валидация переменных окружения
+    plans.js          тарифы, регулярки идентификаторов
+    appAuth.js        HMAC-подпись приложения (X-Device-Id / X-Timestamp / X-App-Signature)
+    yandex.js         обмен code → токен Яндекса → Яндекс ID
+    session.js        выпуск/проверка JWT, middleware userAuth
+    service.js        бизнес-логика: register / status / applyPayment
+    xui.js            клиент API 3x-ui
+    yookassa.js       клиент API ЮKassa (создать/получить платёж, повторы, Idempotence-Key)
+    payments.js       разбор проверенного платежа
+    webhook.js        обработка уведомления ЮKassa
+    ipAllow.js        список IP ЮKassa
+    returnPage.js     страница возврата после оплаты
+    util.js           блокировки по ключу, журнал платежей, книга платежей
+    check-xui.js, xuiDiagnostics.js   диагностика связи с 3x-ui
 ```
 
-## Запуск
 
-```bash
-cp backend/.env.example backend/.env      # .env.example я тебе скину, добавь че надо
-docker compose up -d --build
-docker compose logs -f api
-curl http://127.0.0.1:3000/healthz
-```
-
-## Эндпоинты
-
-| Метод | Ответ |
+| Метод и путь | Тело / ответ |
 |---|---|
-| `POST /api/v1/register` `{deviceId}` | `{success, subLink, expiryTime}` (идемпотентно) |
-| `GET /api/v1/status?deviceId=` | `{success, isActive, expiryTime}`; **404**, если клиента нет |
-| `POST /api/v1/create-payment` `{deviceId, plan}` | `{success, paymentUrl}` — контракт для Android не изменился |
-| `POST /webhook/yookassa` | 200 / 400 (мусор, подделка) / 403 (если `YOOKASSA_IP_CHECK=1` и IP чужой) / 5xx (сбой — ЮKassa повторит) |
-| `GET /payment/return` | HTML-страница возврата (return_url) |
+| `GET /healthz` | `{ok: true}` |
+| `POST /api/v1/auth/yandex` | `{code, codeVerifier}` → `{success, token, expiresAt, login}` |
+| `POST /api/v1/auth/refresh` | → новый `{token, expiresAt, login}` на полный срок |
+| `POST /api/v1/register` | → `{success, subLink, expiryTime}`. Идемпотентно: существующему клиенту вернёт его ссылку; новому выдаст триал 24 ч |
+| `GET /api/v1/status` | → `{success, isActive, expiryTime}`; **404**, если клиента нет |
+| `POST /api/v1/create-payment` | `{plan: "1_month" \| "2_months" \| "3_months"}` → `{success, paymentUrl}` |
+| `POST /webhook/yookassa` | уведомление ЮKassa: 200 / 400 / 403 (при `YOOKASSA_IP_CHECK=1`) / 5xx (ЮKassa повторит) |
+| `GET /payment/return` | HTML-страница возврата (`return_url`) |
 
-Платёж создаётся с `capture: true`, `amount: {value: "150.00", currency: "RUB"}`, `confirmation: redirect`, описание
-«Продление VPN подписки на N мес.» (лимит ЮKassa — 128 символов) и `metadata: {device_id, plan}`. Для каждого POST
-генерируется `Idempotence-Key`; при сетевых ошибках/5xx/202 запрос повторяется с тем же ключом.
+Коды ошибок (`{success:false, error}`): `403 forbidden` (подпись), `401 unauthorized` / `invalid_code`, `400 bad_request` / `invalid_plan`, `404 client_not_found`, `429 too_many_requests`, `502 upstream_unavailable`, `500 internal_error`.
 
-## Безопасность вебхука
+### Тарифы
 
-- Подлинность: повторный запрос платежа в ЮKassa (главная защита) + IP-список. По умолчанию чужой IP только пишется в лог
-  (`[webhook] request from non-YooKassa IP …`): за reverse proxy `req.ip` берётся из `X-Forwarded-For`, и при неверной настройке
-  прокси жёсткая проверка отвергала бы настоящие уведомления. Проверьте по логам, что реальные уведомления приходят с адресов
-  ЮKassa, и тогда включайте `YOOKASSA_IP_CHECK=1`. Прокси должен **перезаписывать** `X-Forwarded-For`, а не дописывать клиентский.
-- Идемпотентность: ключ `yookassa:<id платежа>` в журнале `/data`; параллельные и повторные доставки продлят подписку один раз.
-- Журнал пишется только после успешного обновления 3x-ui: при сбое отдаём 5xx, ЮKassa повторит, платёж не потеряется.
-- Книга платежей: `/data/payments.jsonl` (см. раздел про самозанятых).
-- Платёж реальный, но непригодный (нет `device_id`, неизвестный тариф, недоплата, не RUB) → 200 и строка
-  `PAID but unusable payment …` в логе: повторы не помогут, такие случаи разбирайте вручную (возврат/ручное продление).
+| Ключ | Срок | Цена |
+|---|---|---|
+| `1_month` | 30 дней | 150 ₽ |
+| `2_months` | 60 дней | 280 ₽ |
+| `3_months` | 90 дней | 400 ₽ |
 
+### Ограничения частоты
 
-## Подключение к 3x-ui (Docker) — по шагам
+| Маршрут | Лимит (на IP) |
+|---|---|
+| `/api/v1/*` в целом | 120 / мин |
+| `POST /auth/yandex` | 30 / час |
+| `POST /register` (только выдача **нового** триала) | 10 / час |
+| `POST /create-payment` | 30 / час |
+| `POST /webhook/yookassa` | 300 / мин |
 
-Кто с кем разговаривает:
-
-```
-Телефон ──HTTPS──▶ ваш API (reverse proxy e-kvn.ru:8443 → api:3000) ──HTTP, внутри сервера──▶ панель 3x-ui (:2053)
-Телефон ──HTTPS──▶ сервер подписок 3x-ui (:2096) — отдаёт vless://-ссылку
-Телефон ──Reality──▶ инбаунд 3x-ui (:443) — сам VPN-трафик
-ЮKassa ──HTTPS──▶ ваш API (:8443) /webhook/yookassa
-```
-
-
-**Остальные значения.**
-- `XUI_API_TOKEN` — создай в панельке токен и заполни.
-- `XUI_INBOUND_ID` — id инбаунда **VLESS + Reality**, в который backend будет добавлять клиентов.
-- `SUB_BASE_URL` — «Настройки панели → Подписка»: включите службу подписки; адрес = `https://<домен>:<порт подписки>/<путь>`
-  без `/` в конце, например `https://vpn.example.com:2096/sub`. Этот адрес открывает **телефон**, поэтому нужны открытый порт
-  в фаерволе и **валидный сертификат**
-
-**Запустите и проверьте связь.**
-
-```bash
-docker compose up -d --build
-docker compose exec api node src/check-xui.js
-```
-
-Скрипт авторизуется в панели (токеном или логином), показывает список инбаундов с их id (стрелка `← XUI_INBOUND_ID` у выбранного), проверяет, что инбаунд — VLESS+TCP+Reality,
-а при проблемах пишет причину и что сделать (фаервол, неверный путь панели, токен/пароль, `extra_hosts`).
-
-**HTTPS для API (раньше пункт 4).** Нужен, потому что (а) приложение ходит в API только по `https`, а (б) ЮKassa принимает
-вебхуки только на HTTPS-порты 443 или 8443. Порт 443 у вас, вероятно, занят Reality, поэтому — 8443:
-
-```bash
-sudo ufw allow 8443/tcp        # фаервол открой.
-```
-Итоговые значения: `API_BASE_URL=https://api.example.com:8443/` (Android, `local.properties`),
-   `YOOKASSA_RETURN_URL=https://api.example.com:8443/payment/return`,
-   URL уведомлений в ЮKassa: `https://api.example.com:8443/webhook/yookassa`.
-
-тебе нужно проксировать порт 8443 на localhost:3000, для этого тебе нужно открыть конфиги nginx/apache - че у тебя там. и записать примерно следующее:
-```bash
-server {
-    listen 8443 ssl;
-    server_name api.e-kvn.ru;
-    # ... ssl сертификаты ...
-
-    # Запросы к /webhook/yookassa и всему остальному идут в VPN API
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        # ... (те же proxy_set_header, что и выше) ...
-    }
-
-    # (ОПЦИОНАЛЬНО) Если телеграм-бот тоже должен получать вебхуки через этот же домен:
-    location /telegram-webhook/ {
-        proxy_pass http://127.0.0.1:8080/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-## Проверка платежа в тестовом магазине
-
-1. Тестовые `YOOKASSA_*` в `.env`, `docker compose up -d --build`, URL уведомлений в кабинете тестового магазина.
-2. В приложении: истечь подписке (или «Продлить подписку») → тариф → Custom Tab с формой ЮKassa → тестовая карта.
-3. В логе backend: `[payment] created …` → `[webhook] yookassa:<id> device=… plan=…: applied`.
-4. Возврат в приложение: «Подписка продлена».
