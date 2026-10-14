@@ -40,7 +40,24 @@ export class SubscriptionService {
     return withKeyLock(userId, async () => {
       const traffic = await this.xui.getClientTraffic(userId); // как в ТЗ: проверка по email
       if (traffic) {
-        const existing = await this.xui.findClient(userId);
+        let existing = await this.xui.findClient(userId);
+        if (!existing) {
+          this.log.warn(`[register] ${userId}: клиент есть в трафике, но clients/get его не вернул — ссылку построить нельзя`);
+        } else if (!existing.subId) {
+          // Без subId ссылку подписки не построить (приложение покажет «сервер не вернул ссылку»).
+          // Самолечение: выдаём subId и сохраняем. Срок и enable берём из строки трафика — update заменяет
+          // клиента целиком, и потерять срок (0 = безлимит) нельзя.
+          this.log.warn(`[register] ${userId}: у клиента нет subId (поля: ${Object.keys(existing).join(',')}), генерирую`);
+          const healed = {
+            ...existing,
+            email: userId,
+            subId: crypto.randomBytes(8).toString('hex'),
+            expiryTime: existing.expiryTime ?? traffic.expiryTime ?? 0,
+            enable: existing.enable ?? traffic.enable ?? true,
+          };
+          await this.xui.updateClient(userId, healed);
+          existing = healed;
+        }
         return {
           created: false,
           subLink: this.subLink(existing),
